@@ -1,4 +1,3 @@
-```markdown
 # Agent Register Service
 
 A lightweight microservice for registering and discovering A2A (Agent-to-Agent) protocol compatible agents. This service acts as a registry/directory that allows agent clients to discover available agents based on their capabilities and skills.

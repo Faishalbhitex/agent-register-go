@@ -1,4 +1,3 @@
-// models/agent_card.go
 package models
 
 import (
@@ -19,6 +18,8 @@ type AgentCard struct {
 	Skills      []string `json:"skills"`
 	Description string   `json:"description"`
 	URL         string   `json:"url"`
+	Status      string   `json:"status"`
+	LastSeenAt  *string  `json:"last_seen_at,omitempty"`
 	CreatedAt   string   `json:"created_at,omitempty"`
 }
 
@@ -44,6 +45,7 @@ func CreateAgentFromURL(url string) (*AgentCard, error) {
 		Skills:      skills,
 		Description: card.Description,
 		URL:         url,
+		Status:      "registered", // Default status
 	}
 
 	// Save to database
@@ -93,8 +95,8 @@ func contains(slice []string, item string) bool {
 func (a *AgentCard) save() error {
 	skillsJSON, _ := json.Marshal(a.Skills)
 
-	query := `INSERT INTO agents (name, skills, description, url) VALUES (?, ?, ?, ?)`
-	result, err := database.DB.Exec(query, a.Name, string(skillsJSON), a.Description, a.URL)
+	query := `INSERT INTO agents (name, skills, description, url, status) VALUES (?, ?, ?, ?, ?)`
+	result, err := database.DB.Exec(query, a.Name, string(skillsJSON), a.Description, a.URL, a.Status)
 	if err != nil {
 		return err
 	}
@@ -104,9 +106,20 @@ func (a *AgentCard) save() error {
 	return nil
 }
 
-// Get all agents
-func GetAllAgents() ([]AgentCard, error) {
-	query := `SELECT id, name, skills, description, url, created_at FROM agents ORDER BY created_at DESC`
+// Get all agents with optional availability filter
+func GetAllAgents(availableOnly bool) ([]AgentCard, error) {
+	var query string
+
+	if availableOnly {
+		// Filter for agents with recent activity (last 5 minutes) or status 'available'
+		query = `SELECT id, name, skills, description, url, status, last_seen_at, created_at 
+				FROM agents 
+				WHERE (status = 'available' OR (last_seen_at IS NOT NULL AND datetime(last_seen_at) > datetime('now', '-5 minutes')))
+				ORDER BY created_at DESC`
+	} else {
+		query = `SELECT id, name, skills, description, url, status, last_seen_at, created_at FROM agents ORDER BY created_at DESC`
+	}
+
 	rows, err := database.DB.Query(query)
 	if err != nil {
 		return nil, err
@@ -118,8 +131,10 @@ func GetAllAgents() ([]AgentCard, error) {
 		var agent AgentCard
 		var skillsJSON string
 		var createdAt time.Time
+		var lastSeenAt sql.NullTime
 
-		err := rows.Scan(&agent.ID, &agent.Name, &skillsJSON, &agent.Description, &agent.URL, &createdAt)
+		err := rows.Scan(&agent.ID, &agent.Name, &skillsJSON, &agent.Description,
+			&agent.URL, &agent.Status, &lastSeenAt, &createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +142,13 @@ func GetAllAgents() ([]AgentCard, error) {
 		// Parse skills JSON
 		json.Unmarshal([]byte(skillsJSON), &agent.Skills)
 		agent.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
+
+		// Handle nullable last_seen_at
+		if lastSeenAt.Valid {
+			lastSeenStr := lastSeenAt.Time.Format("2006-01-02 15:04:05")
+			agent.LastSeenAt = &lastSeenStr
+		}
+
 		agents = append(agents, agent)
 	}
 
@@ -135,14 +157,16 @@ func GetAllAgents() ([]AgentCard, error) {
 
 // Get agent by ID
 func GetAgentByID(id int) (*AgentCard, error) {
-	query := `SELECT id, name, skills, description, url, created_at FROM agents WHERE id = ?`
+	query := `SELECT id, name, skills, description, url, status, last_seen_at, created_at FROM agents WHERE id = ?`
 
 	var agent AgentCard
 	var skillsJSON string
 	var createdAt time.Time
+	var lastSeenAt sql.NullTime
 
 	err := database.DB.QueryRow(query, id).Scan(
-		&agent.ID, &agent.Name, &skillsJSON, &agent.Description, &agent.URL, &createdAt,
+		&agent.ID, &agent.Name, &skillsJSON, &agent.Description,
+		&agent.URL, &agent.Status, &lastSeenAt, &createdAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -155,7 +179,45 @@ func GetAgentByID(id int) (*AgentCard, error) {
 	json.Unmarshal([]byte(skillsJSON), &agent.Skills)
 	agent.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 
+	// Handle nullable last_seen_at
+	if lastSeenAt.Valid {
+		lastSeenStr := lastSeenAt.Time.Format("2006-01-02 15:04:05")
+		agent.LastSeenAt = &lastSeenStr
+	}
+
 	return &agent, nil
+}
+
+// Update agent heartbeat
+func UpdateAgentHeartbeat(id int) error {
+	query := `UPDATE agents SET status = 'available', last_seen_at = datetime('now') WHERE id = ?`
+	result, err := database.DB.Exec(query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+// Update agent heartbeat by URL
+func UpdateAgentHeartbeatByURL(url string) error {
+	query := `UPDATE agents SET status = 'available', last_seen_at = datetime('now') WHERE url = ?`
+	result, err := database.DB.Exec(query, url)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
 
 // Delete agent by ID

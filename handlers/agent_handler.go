@@ -43,18 +43,32 @@ func RegisterAgent(c *gin.Context) {
 	})
 }
 
-// GET /agents - Get all agents
+// GET /agents - Get all agents with optional availability filter
 func GetAllAgents(c *gin.Context) {
-	agents, err := models.GetAllAgents()
+	// Check for availability filter
+	availableOnly := c.Query("available") == "true"
+
+	agents, err := models.GetAllAgents(availableOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch agents"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"count":  len(agents),
 		"agents": agents,
-	})
+	}
+
+	// Add filter info to response
+	if availableOnly {
+		response["filter"] = "available_only"
+		response["note"] = "Showing only agents that are currently available or recently active"
+	} else {
+		response["filter"] = "all_registered"
+		response["note"] = "Showing all registered agents regardless of availability"
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GET /agents/:id - Get agent by ID
@@ -78,6 +92,32 @@ func GetAgentByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, agent)
+}
+
+// POST /agents/:id/heartbeat - Update agent heartbeat
+func UpdateAgentHeartbeat(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid agent ID"})
+		return
+	}
+
+	err = models.UpdateAgentHeartbeat(id)
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update heartbeat"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Agent heartbeat updated",
+		"timestamp": "now",
+		"status":    "available",
+	})
 }
 
 // DELETE /agents/:id - Delete agent by ID

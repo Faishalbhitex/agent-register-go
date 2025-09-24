@@ -1,4 +1,3 @@
-// routers/router.go
 package routers
 
 import (
@@ -19,6 +18,7 @@ func SetupRouter() *gin.Engine {
 	r.POST("/agents", handlers.RegisterAgent)
 	r.GET("/agents", handlers.GetAllAgents)
 	r.GET("/agents/:id", handlers.GetAgentByID)
+	r.POST("/agents/:id/heartbeat", handlers.UpdateAgentHeartbeat)
 	r.DELETE("/agents/:id", handlers.DeleteAgent)
 
 	return r
